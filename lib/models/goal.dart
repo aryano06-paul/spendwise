@@ -7,7 +7,7 @@ class Goal {
   final double saved;
   final IconData icon;
 
-  Goal({
+  const Goal({
     required this.title,
     required this.subtitle,
     required this.target,
@@ -16,10 +16,15 @@ class Goal {
   });
 
   double get progress {
-    if (target == 0) {
-      return 0;
+    if (target <= 0) {
+      return 0.0;
     }
 
-    return saved / target;
+    return (saved / target).clamp(0.0, 1.0);
+  }
+
+  double get remaining {
+    final value = target - saved;
+    return value < 0 ? 0.0 : value;
   }
 }

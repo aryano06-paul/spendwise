@@ -27,7 +27,6 @@ class _SpendWiseAppState extends State<SpendWiseApp> {
       debugShowCheckedModeBanner: false,
       title: 'Spendwise',
       themeMode: themeMode,
-
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
@@ -36,8 +35,15 @@ class _SpendWiseAppState extends State<SpendWiseApp> {
           seedColor: const Color(0xFF675CF6),
           brightness: Brightness.light,
         ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+        ),
       ),
-
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -46,8 +52,15 @@ class _SpendWiseAppState extends State<SpendWiseApp> {
           seedColor: const Color(0xFF7C73FF),
           brightness: Brightness.dark,
         ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF171A2A),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+        ),
       ),
-
       home: HomeScreen(
         currentTheme: themeMode,
         onThemeChanged: changeTheme,

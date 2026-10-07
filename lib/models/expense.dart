@@ -16,7 +16,7 @@ class Expense {
   final ExpenseCategory category;
   final DateTime date;
 
-  Expense({
+  const Expense({
     required this.id,
     required this.title,
     required this.amount,

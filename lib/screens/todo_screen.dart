@@ -5,12 +5,14 @@ class TodoScreen extends StatefulWidget {
   final List<Todo> todos;
   final void Function(Todo) onAddTodo;
   final void Function(String) onDeleteTodo;
+  final VoidCallback onTodosChanged;
 
   const TodoScreen({
     super.key,
     required this.todos,
     required this.onAddTodo,
     required this.onDeleteTodo,
+    required this.onTodosChanged,
   });
 
   @override
@@ -81,10 +83,20 @@ class _TodoScreenState extends State<TodoScreen> {
         .toList();
   }
 
+  List<Todo> get pastTodos {
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+
+    return widget.todos
+        .where((todo) => todo.date.isBefore(startOfToday))
+        .toList();
+  }
+
   void _toggleTodo(Todo todo) {
     setState(() {
       todo.completed = !todo.completed;
     });
+    widget.onTodosChanged();
   }
 
   void _addTodo() {
@@ -193,6 +205,20 @@ class _TodoScreenState extends State<TodoScreen> {
                   ),
                 ),
               ),
+            if (pastTodos.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _sectionTitle(context, 'Earlier'),
+              const SizedBox(height: 12),
+              ...pastTodos.map(
+                (todo) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _todoCard(
+                    context,
+                    todo,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -614,7 +640,7 @@ class _TodoScreenState extends State<TodoScreen> {
   }
 }
 
-class _AddTodoSheet extends StatelessWidget {
+class _AddTodoSheet extends StatefulWidget {
   final TextEditingController titleController;
   final TodoPriority selectedPriority;
   final DateTime selectedDate;
@@ -630,6 +656,14 @@ class _AddTodoSheet extends StatelessWidget {
     required this.onDateChanged,
     required this.onSave,
   });
+
+  @override
+  State<_AddTodoSheet> createState() => _AddTodoSheetState();
+}
+
+class _AddTodoSheetState extends State<_AddTodoSheet> {
+  late TodoPriority _priority = widget.selectedPriority;
+  late DateTime _date = widget.selectedDate;
 
   @override
   Widget build(BuildContext context) {
@@ -679,7 +713,7 @@ class _AddTodoSheet extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               TextField(
-                controller: titleController,
+                controller: widget.titleController,
                 decoration: const InputDecoration(
                   labelText: 'Task title',
                   hintText:
@@ -704,13 +738,15 @@ class _AddTodoSheet extends StatelessWidget {
                       label: Text(
                         _priorityName(priority),
                       ),
-                      selected:
-                      selectedPriority ==
+                      selected: _priority == priority,
+                      onSelected: (_) {
+                        setState(() {
+                          _priority = priority;
+                        });
+                        widget.onPriorityChanged(
                           priority,
-                      onSelected: (_) =>
-                          onPriorityChanged(
-                            priority,
-                          ),
+                        );
+                      },
                     );
                   },
                 ).toList(),
@@ -723,12 +759,17 @@ class _AddTodoSheet extends StatelessWidget {
                     context: context,
                     firstDate: DateTime(2020),
                     lastDate: DateTime(2035),
-                    initialDate: selectedDate,
+                    initialDate: _date,
                   );
 
-                  if (picked != null) {
-                    onDateChanged(picked);
+                  if (picked == null || !mounted) {
+                    return;
                   }
+
+                  setState(() {
+                    _date = picked;
+                  });
+                  widget.onDateChanged(picked);
                 },
                 borderRadius:
                 BorderRadius.circular(18),
@@ -758,9 +799,9 @@ class _AddTodoSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '${selectedDate.day}/'
-                            '${selectedDate.month}/'
-                            '${selectedDate.year}',
+                        '${_date.day}/'
+                            '${_date.month}/'
+                            '${_date.year}',
                         style: const TextStyle(
                           fontWeight:
                           FontWeight.w800,
@@ -775,7 +816,7 @@ class _AddTodoSheet extends StatelessWidget {
                 width: double.infinity,
                 height: 55,
                 child: FilledButton(
-                  onPressed: onSave,
+                  onPressed: widget.onSave,
                   style:
                   FilledButton.styleFrom(
                     backgroundColor:

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class AppearanceScreen extends StatelessWidget {
+class AppearanceScreen extends StatefulWidget {
   final ThemeMode currentTheme;
   final void Function(ThemeMode) onThemeChanged;
 
@@ -9,6 +9,14 @@ class AppearanceScreen extends StatelessWidget {
     required this.currentTheme,
     required this.onThemeChanged,
   });
+
+  @override
+  State<AppearanceScreen> createState() =>
+      _AppearanceScreenState();
+}
+
+class _AppearanceScreenState extends State<AppearanceScreen> {
+  late ThemeMode _current = widget.currentTheme;
 
   @override
   Widget build(BuildContext context) {
@@ -223,12 +231,15 @@ class AppearanceScreen extends StatelessWidget {
       IconData icon,
       ThemeMode mode,
       ) {
-    final selected = currentTheme == mode;
+    final selected = _current == mode;
     const accent = Color(0xFF675CF6);
 
     return GestureDetector(
       onTap: () {
-        onThemeChanged(mode);
+        setState(() {
+          _current = mode;
+        });
+        widget.onThemeChanged(mode);
       },
       child: Container(
         height: 115,

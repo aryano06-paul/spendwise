@@ -610,7 +610,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
   }
 }
 
-class _AddExpenseSheet extends StatelessWidget {
+class _AddExpenseSheet extends StatefulWidget {
   final TextEditingController titleController;
   final TextEditingController amountController;
   final ExpenseCategory selectedCategory;
@@ -628,6 +628,15 @@ class _AddExpenseSheet extends StatelessWidget {
     required this.onDateChanged,
     required this.onSave,
   });
+
+  @override
+  State<_AddExpenseSheet> createState() =>
+      _AddExpenseSheetState();
+}
+
+class _AddExpenseSheetState extends State<_AddExpenseSheet> {
+  late ExpenseCategory _category = widget.selectedCategory;
+  late DateTime _date = widget.selectedDate;
 
   @override
   Widget build(BuildContext context) {
@@ -679,7 +688,7 @@ class _AddExpenseSheet extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               TextField(
-                controller: titleController,
+                controller: widget.titleController,
                 decoration: const InputDecoration(
                   labelText: 'Description',
                   hintText: 'e.g. Lunch at Zomato',
@@ -689,7 +698,7 @@ class _AddExpenseSheet extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: amountController,
+                controller: widget.amountController,
                 keyboardType:
                 const TextInputType.numberWithOptions(
                   decimal: true,
@@ -719,13 +728,15 @@ class _AddExpenseSheet extends StatelessWidget {
                       label: Text(
                         _categoryText(category),
                       ),
-                      selected:
-                      selectedCategory ==
+                      selected: _category == category,
+                      onSelected: (_) {
+                        setState(() {
+                          _category = category;
+                        });
+                        widget.onCategoryChanged(
                           category,
-                      onSelected: (_) =>
-                          onCategoryChanged(
-                            category,
-                          ),
+                        );
+                      },
                     );
                   },
                 ).toList(),
@@ -738,12 +749,17 @@ class _AddExpenseSheet extends StatelessWidget {
                     context: context,
                     firstDate: DateTime(2020),
                     lastDate: DateTime(2035),
-                    initialDate: selectedDate,
+                    initialDate: _date,
                   );
 
-                  if (picked != null) {
-                    onDateChanged(picked);
+                  if (picked == null || !mounted) {
+                    return;
                   }
+
+                  setState(() {
+                    _date = picked;
+                  });
+                  widget.onDateChanged(picked);
                 },
                 borderRadius:
                 BorderRadius.circular(18),
@@ -773,7 +789,7 @@ class _AddExpenseSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        _formatFullDate(selectedDate),
+                        _formatFullDate(_date),
                         style: const TextStyle(
                           fontWeight:
                           FontWeight.w800,
@@ -788,7 +804,7 @@ class _AddExpenseSheet extends StatelessWidget {
                 width: double.infinity,
                 height: 55,
                 child: FilledButton(
-                  onPressed: onSave,
+                  onPressed: widget.onSave,
                   style:
                   FilledButton.styleFrom(
                     backgroundColor:

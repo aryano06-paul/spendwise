@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/expense.dart';
 import '../models/todo.dart';
 import 'analytics_screen.dart';
@@ -29,26 +32,82 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final List<Expense> expenses = [];
 
-  final List<Todo> todos = [
-    Todo(
-      id: '1',
-      title: 'Complete CN assignment',
-      date: DateTime(2026, 10, 4, 14, 0),
-      priority: TodoPriority.medium,
-    ),
-    Todo(
-      id: '2',
-      title: 'Go to gym',
-      date: DateTime(2026, 10, 4, 18, 0),
-      priority: TodoPriority.low,
-    ),
-    Todo(
-      id: '3',
-      title: 'Study German A1',
-      date: DateTime(2026, 10, 4, 20, 0),
-      priority: TodoPriority.high,
-    ),
-  ];
+  final List<Todo> todos = [];
+
+  static const String _expensesKey = 'spendwise_expenses_v1';
+  static const String _todosKey = 'spendwise_todos_v1';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final expenseJson = prefs.getString(_expensesKey);
+      final todoJson = prefs.getString(_todosKey);
+
+      final loadedExpenses = <Expense>[];
+      final loadedTodos = <Todo>[];
+
+      if (expenseJson != null) {
+        for (final item in jsonDecode(expenseJson) as List<dynamic>) {
+          loadedExpenses.add(
+            Expense.fromJson(item as Map<String, dynamic>),
+          );
+        }
+      }
+
+      if (todoJson != null) {
+        for (final item in jsonDecode(todoJson) as List<dynamic>) {
+          loadedTodos.add(
+            Todo.fromJson(item as Map<String, dynamic>),
+          );
+        }
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        expenses
+          ..clear()
+          ..addAll(loadedExpenses);
+        todos
+          ..clear()
+          ..addAll(loadedTodos);
+      });
+    } catch (_) {
+      // Corrupted or unavailable storage: start with empty lists.
+    }
+  }
+
+  Future<void> _saveExpenses() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _expensesKey,
+        jsonEncode(expenses.map((e) => e.toJson()).toList()),
+      );
+    } catch (_) {
+      // Saving is best effort; the in-memory data is still correct.
+    }
+  }
+
+  Future<void> _saveTodos() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _todosKey,
+        jsonEncode(todos.map((t) => t.toJson()).toList()),
+      );
+    } catch (_) {
+      // Saving is best effort; the in-memory data is still correct.
+    }
+  }
 
   double get totalSpent {
     return expenses.fold(
@@ -74,6 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       expenses.insert(0, expense);
     });
+    _saveExpenses();
   }
 
   void _deleteExpense(String id) {
@@ -82,12 +142,14 @@ class _HomeScreenState extends State<HomeScreen> {
             (expense) => expense.id == id,
       );
     });
+    _saveExpenses();
   }
 
   void _addTodo(Todo todo) {
     setState(() {
       todos.add(todo);
     });
+    _saveTodos();
   }
 
   void _deleteTodo(String id) {
@@ -96,6 +158,7 @@ class _HomeScreenState extends State<HomeScreen> {
             (todo) => todo.id == id,
       );
     });
+    _saveTodos();
   }
 
   void _openGoals() {
@@ -145,6 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
         todos: todos,
         onAddTodo: _addTodo,
         onDeleteTodo: _deleteTodo,
+        onTodosChanged: _saveTodos,
       ),
       InsightsScreen(
         expenses: expenses,
@@ -912,6 +976,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
+                      color: Colors.black87,
                     ),
                   ),
                   SizedBox(height: 4),
@@ -920,6 +985,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.4,
+                      color: Colors.black87,
                     ),
                   ),
                 ],
@@ -928,6 +994,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Icon(
               Icons.arrow_forward_ios_rounded,
               size: 16,
+              color: Colors.black87,
             ),
           ],
         ),

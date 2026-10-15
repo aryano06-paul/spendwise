@@ -1,8 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../utils/app_format.dart';
+import '../widgets/controller_scope.dart';
 import '../widgets/editor_sheets.dart';
 
 class AppearanceScreen extends StatelessWidget {
@@ -19,8 +21,21 @@ class AppearanceScreen extends StatelessWidget {
         children: [
           Text('Make it yours', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
           const SizedBox(height: 5),
-          Text('Your choices are saved on this device.', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          Text('Your choices are saved to your account.', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 20),
+          _SectionCard(
+            title: 'Account',
+            subtitle: FirebaseAuth.instance.currentUser?.email ?? 'Signed in',
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _signOut(context),
+                icon: const Icon(Icons.logout_rounded),
+                label: const Text('Sign out'),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           _SectionCard(
             title: 'Theme',
             subtitle: 'Choose how SpendWise appears',
@@ -140,7 +155,7 @@ class AppearanceScreen extends StatelessWidget {
           const SizedBox(height: 12),
           _SectionCard(
             title: 'Data management',
-            subtitle: 'Your data is kept on this device. It is not synced to a cloud account or connected to your bank.',
+            subtitle: 'Your data is saved to your private account and is not connected to your bank.',
             child: SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -149,7 +164,7 @@ class AppearanceScreen extends StatelessWidget {
                   final confirmed = await confirmDelete(
                     context,
                     title: 'Clear all data?',
-                    message: 'This removes every expense, task, and goal from this device. Export a backup first if you may need it.',
+                    message: 'This removes every expense, task, and goal from your account. Export a backup first if you may need it.',
                   );
                   if (confirmed) {
                     state.clearFinancialData();
@@ -164,10 +179,16 @@ class AppearanceScreen extends StatelessWidget {
           const SizedBox(height: 20),
           Center(child: Text('SpendWise Aurora · Version 1.0.0', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
           const SizedBox(height: 5),
-          Center(child: Text('Local-first personal budgeting · No bank connection', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+          Center(child: Text('Personal budgeting · No bank connection', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
         ],
       ),
     );
+  }
+
+  Future<void> _signOut(BuildContext context) async {
+    // Close this screen first so no page of the old account stays open.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    await FirebaseAuth.instance.signOut();
   }
 
   Future<void> _editBudget(BuildContext context) async {
@@ -177,7 +198,9 @@ class AppearanceScreen extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Monthly budget'),
-        content: Form(
+        content: ControllerScope(
+          controllers: [controller],
+          child: Form(
           key: formKey,
           child: TextFormField(
             controller: controller,
@@ -189,6 +212,7 @@ class AppearanceScreen extends StatelessWidget {
               if (amount == null || !amount.isFinite || amount <= 0) return 'Enter a budget greater than zero';
               return null;
             },
+          ),
           ),
         ),
         actions: [
@@ -204,7 +228,6 @@ class AppearanceScreen extends StatelessWidget {
         ],
       ),
     );
-    controller.dispose();
   }
 
   Future<void> _restoreBackup(BuildContext context) async {
@@ -214,7 +237,9 @@ class AppearanceScreen extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Restore backup'),
-        content: Form(
+        content: ControllerScope(
+          controllers: [controller],
+          child: Form(
           key: formKey,
           child: SizedBox(
             width: 480,
@@ -225,6 +250,7 @@ class AppearanceScreen extends StatelessWidget {
               decoration: const InputDecoration(hintText: 'Paste the SpendWise JSON backup here'),
               validator: (value) => value == null || value.trim().isEmpty ? 'Paste the backup first' : null,
             ),
+          ),
           ),
         ),
         actions: [
@@ -239,14 +265,13 @@ class AppearanceScreen extends StatelessWidget {
         ],
       ),
     );
-    controller.dispose();
     if (content == null || !context.mounted) return;
 
     final shouldReplace = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Replace current data?'),
-        content: const Text('Restoring this backup replaces the current lists and settings on this device.'),
+        content: const Text('Restoring this backup replaces the current lists and settings in your account.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Replace data')),

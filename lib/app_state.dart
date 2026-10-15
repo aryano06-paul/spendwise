@@ -1,16 +1,26 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/expense.dart';
 import 'models/goal.dart';
 import 'models/todo.dart';
+import 'services/cloud_store.dart';
 
 class SpendWiseState extends ChangeNotifier {
-  static const String _storageKey = 'spendwise_data_v1';
-  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
-  Future<void> _saveQueue = Future<void>.value();
+  /// One instance per signed-in user. All data is read from and saved to that
+  /// user's own area in Cloud Firestore through [store].
+  SpendWiseState({required CloudStore store}) : _store = store;
+
+  final CloudStore _store;
+  final Set<Future<void>> _pendingWrites = {};
+  bool _disposed = false;
+
+  /// Set when the latest cloud save failed; cleared when a later save works.
+  String? syncError;
+
+  /// Set when loading the user's data failed.
+  String? loadError;
 
   final List<Expense> _expenses = [];
   final List<Todo> _todos = [];
@@ -48,37 +58,61 @@ class SpendWiseState extends ChangeNotifier {
   int get pendingTodoCount => _todos.where((t) => !t.completed).length;
   int get completedTodoCount => _todos.where((t) => t.completed).length;
 
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   Future<void> load() async {
+    loadError = null;
+    isLoaded = false;
+    notifyListeners();
     try {
-      final raw = await _preferences.getString(_storageKey);
-      if (raw != null && raw.isNotEmpty) {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map<String, dynamic>) {
-          _expenses
-            ..clear()
-            ..addAll(_decodeList(decoded['expenses'], Expense.fromJson));
-          _todos
-            ..clear()
-            ..addAll(_decodeList(decoded['todos'], Todo.fromJson));
-          _goals
-            ..clear()
-            ..addAll(_decodeList(decoded['goals'], Goal.fromJson));
-          monthlyBudget = (decoded['monthlyBudget'] as num?)?.toDouble() ?? 25000;
-          accentColorValue = (decoded['accentColorValue'] as num?)?.toInt() ?? 0xFF675CF6;
-          currencyCode = decoded['currencyCode'] as String? ?? 'INR';
-          final themeName = decoded['themeMode'] as String? ?? 'system';
-          themeMode = ThemeMode.values.firstWhere((m) => m.name == themeName, orElse: () => ThemeMode.system);
-        }
-      }
-    } catch (_) {
-      // A damaged local cache should not prevent the app from launching.
-      _expenses.clear();
-      _todos.clear();
-      _goals.clear();
-    } finally {
+      final snapshot = await _store.loadAll();
+      _expenses
+        ..clear()
+        ..addAll(_decodeList(snapshot.expenses, Expense.fromJson));
+      _expenses.sort((a, b) => b.date.compareTo(a.date));
+      _todos
+        ..clear()
+        ..addAll(_decodeList(snapshot.todos, Todo.fromJson));
+      _todos.sort(_compareTodos);
+      _goals
+        ..clear()
+        ..addAll(_decodeList(snapshot.goals, Goal.fromJson));
+      _goals.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final settings = snapshot.settings;
+      if (settings != null) _applySettings(settings);
       isLoaded = true;
+    } catch (_) {
+      loadError = 'We could not load your data. Check your internet connection and try again.';
+    } finally {
       notifyListeners();
     }
+  }
+
+  void _applySettings(Map<String, dynamic> data) {
+    monthlyBudget = (data['monthlyBudget'] as num?)?.toDouble() ?? monthlyBudget;
+    accentColorValue = (data['accentColorValue'] as num?)?.toInt() ?? accentColorValue;
+    currencyCode = data['currencyCode'] as String? ?? currencyCode;
+    final themeName = data['themeMode'] as String?;
+    if (themeName != null) {
+      themeMode = ThemeMode.values.firstWhere((m) => m.name == themeName, orElse: () => ThemeMode.system);
+    }
+  }
+
+  int _compareTodos(Todo a, Todo b) {
+    if (a.completed != b.completed) return a.completed ? 1 : -1;
+    if (a.dueDate == null && b.dueDate == null) return b.createdAt.compareTo(a.createdAt);
+    if (a.dueDate == null) return 1;
+    if (b.dueDate == null) return -1;
+    return a.dueDate!.compareTo(b.dueDate!);
   }
 
   List<T> _decodeList<T>(dynamic source, T Function(Map<String, dynamic>) fromJson) {
@@ -108,18 +142,51 @@ class SpendWiseState extends ChangeNotifier {
         'currencyCode': currencyCode,
       };
 
-  void _changed() {
-    notifyListeners();
-    final payload = jsonEncode(_toMap());
-    _saveQueue = _saveQueue.then((_) => _preferences.setString(_storageKey, payload)).catchError((Object _) {});
+  Map<String, dynamic> _settingsMap() => {
+        'monthlyBudget': monthlyBudget,
+        'themeMode': themeMode.name,
+        'accentColorValue': accentColorValue,
+        'currencyCode': currencyCode,
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+
+  void _changed() => notifyListeners();
+
+  /// Sends one change to the cloud without blocking the screen. Failures are
+  /// reported through [syncError] so the app can tell the user.
+  void _write(Future<void> Function(CloudStore store) operation) {
+    late final Future<void> future;
+    future = Future<void>.sync(() => operation(_store)).then<void>((_) {
+      if (syncError != null) {
+        syncError = null;
+        notifyListeners();
+      }
+    }).catchError((Object error) {
+      syncError = 'Your latest changes could not be saved to your account. Check your internet connection.';
+      notifyListeners();
+    }).whenComplete(() {
+      _pendingWrites.remove(future);
+    });
+    _pendingWrites.add(future);
   }
 
-  Future<void> waitForSave() => _saveQueue;
+  void _saveExpense(Expense expense) => _write((store) => store.saveItem(CloudStore.expensesCollection, expense.id, expense.toJson()));
+  void _saveTodo(Todo todo) => _write((store) => store.saveItem(CloudStore.todosCollection, todo.id, todo.toJson()));
+  void _saveGoal(Goal goal) => _write((store) => store.saveItem(CloudStore.goalsCollection, goal.id, goal.toJson()));
+  void _deleteRemote(String collection, String id) => _write((store) => store.deleteItem(collection, id));
+  void _saveSettings() => _write((store) => store.saveSettings(_settingsMap()));
+
+  Future<void> waitForSave() async {
+    while (_pendingWrites.isNotEmpty) {
+      await Future.wait(List<Future<void>>.of(_pendingWrites));
+    }
+  }
 
   void addExpense(Expense expense) {
     _expenses.insert(0, expense);
     _expenses.sort((a, b) => b.date.compareTo(a.date));
     _changed();
+    _saveExpense(expense);
   }
 
   void updateExpense(Expense updated) {
@@ -128,47 +195,49 @@ class SpendWiseState extends ChangeNotifier {
     _expenses[index] = updated;
     _expenses.sort((a, b) => b.date.compareTo(a.date));
     _changed();
+    _saveExpense(updated);
   }
 
   void deleteExpense(String id) {
     _expenses.removeWhere((e) => e.id == id);
     _changed();
+    _deleteRemote(CloudStore.expensesCollection, id);
   }
 
   void addTodo(Todo todo) {
     _todos.insert(0, todo);
     _changed();
+    _saveTodo(todo);
   }
 
   void updateTodo(Todo updated) {
     final index = _todos.indexWhere((t) => t.id == updated.id);
     if (index < 0) return;
     _todos[index] = updated;
-    _todos.sort((a, b) {
-      if (a.completed != b.completed) return a.completed ? 1 : -1;
-      if (a.dueDate == null && b.dueDate == null) return b.createdAt.compareTo(a.createdAt);
-      if (a.dueDate == null) return 1;
-      if (b.dueDate == null) return -1;
-      return a.dueDate!.compareTo(b.dueDate!);
-    });
+    _todos.sort(_compareTodos);
     _changed();
+    _saveTodo(updated);
   }
 
   void toggleTodo(String id) {
     final index = _todos.indexWhere((t) => t.id == id);
     if (index < 0) return;
-    _todos[index] = _todos[index].copyWith(completed: !_todos[index].completed);
+    final toggled = _todos[index].copyWith(completed: !_todos[index].completed);
+    _todos[index] = toggled;
     _changed();
+    _saveTodo(toggled);
   }
 
   void deleteTodo(String id) {
     _todos.removeWhere((t) => t.id == id);
     _changed();
+    _deleteRemote(CloudStore.todosCollection, id);
   }
 
   void addGoal(Goal goal) {
     _goals.insert(0, goal);
     _changed();
+    _saveGoal(goal);
   }
 
   void updateGoal(Goal updated) {
@@ -176,39 +245,47 @@ class SpendWiseState extends ChangeNotifier {
     if (index < 0) return;
     _goals[index] = updated;
     _changed();
+    _saveGoal(updated);
   }
 
   void contributeToGoal(String id, double amount) {
     final index = _goals.indexWhere((g) => g.id == id);
     if (index < 0 || amount <= 0) return;
-    _goals[index] = _goals[index].copyWith(savedAmount: _goals[index].savedAmount + amount);
+    final contributed = _goals[index].copyWith(savedAmount: _goals[index].savedAmount + amount);
+    _goals[index] = contributed;
     _changed();
+    _saveGoal(contributed);
   }
 
   void deleteGoal(String id) {
     _goals.removeWhere((g) => g.id == id);
     _changed();
+    _deleteRemote(CloudStore.goalsCollection, id);
   }
 
   void setMonthlyBudget(double amount) {
     if (amount <= 0) return;
     monthlyBudget = amount;
     _changed();
+    _saveSettings();
   }
 
   void setThemeMode(ThemeMode value) {
     themeMode = value;
     _changed();
+    _saveSettings();
   }
 
   void setAccentColor(Color value) {
     accentColorValue = value.toARGB32();
     _changed();
+    _saveSettings();
   }
 
   void setCurrency(String value) {
     currencyCode = value;
     _changed();
+    _saveSettings();
   }
 
   String exportExpensesCsv() {
@@ -257,7 +334,17 @@ class SpendWiseState extends ChangeNotifier {
       themeMode = ThemeMode.values.firstWhere((m) => m.name == themeName, orElse: () => ThemeMode.system);
     }
     _changed();
+    syncError = null;
+    _write((store) => store.replaceAll(
+          expenses: _expenses.map((e) => e.toJson()).toList(),
+          todos: _todos.map((t) => t.toJson()).toList(),
+          goals: _goals.map((g) => g.toJson()).toList(),
+          settings: _settingsMap(),
+        ));
     await waitForSave();
+    if (syncError != null) {
+      throw StateError('The restored data could not be saved to your account. Check your internet connection and try again.');
+    }
   }
 
   void clearFinancialData() {
@@ -265,5 +352,6 @@ class SpendWiseState extends ChangeNotifier {
     _todos.clear();
     _goals.clear();
     _changed();
+    _write((store) => store.replaceAll(expenses: const [], todos: const [], goals: const []));
   }
 }

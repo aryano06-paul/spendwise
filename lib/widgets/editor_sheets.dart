@@ -4,33 +4,9 @@ import '../models/expense.dart';
 import '../models/goal.dart';
 import '../models/todo.dart';
 import '../utils/app_format.dart';
+import 'controller_scope.dart';
 
 String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
-
-/// Disposes the given controllers only when the sheet/dialog is really
-/// removed from the tree (after its close animation), never earlier.
-class _ControllerScope extends StatefulWidget {
-  const _ControllerScope({required this.controllers, required this.child});
-
-  final List<TextEditingController> controllers;
-  final Widget child;
-
-  @override
-  State<_ControllerScope> createState() => _ControllerScopeState();
-}
-
-class _ControllerScopeState extends State<_ControllerScope> {
-  @override
-  void dispose() {
-    for (final controller in widget.controllers) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
-}
 
 Future<void> showExpenseEditor(BuildContext context, SpendWiseState state, {Expense? existing}) async {
   final formKey = GlobalKey<FormState>();
@@ -44,7 +20,7 @@ Future<void> showExpenseEditor(BuildContext context, SpendWiseState state, {Expe
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    builder: (sheetContext) => _ControllerScope(
+    builder: (sheetContext) => ControllerScope(
       controllers: [titleController, amountController, noteController],
       child: StatefulBuilder(
         builder: (context, setSheetState) => Padding(
@@ -86,7 +62,7 @@ Future<void> showTodoEditor(BuildContext context, SpendWiseState state, {Todo? e
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    builder: (sheetContext) => _ControllerScope(controllers: [titleController, notesController], child: StatefulBuilder(builder: (context, setSheetState) => Padding(
+    builder: (sheetContext) => ControllerScope(controllers: [titleController, notesController], child: StatefulBuilder(builder: (context, setSheetState) => Padding(
       padding: EdgeInsets.fromLTRB(20, 4, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: SingleChildScrollView(child: Form(key: formKey, child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         Text(existing == null ? 'New task' : 'Edit task', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900)),
@@ -118,7 +94,7 @@ Future<void> showGoalEditor(BuildContext context, SpendWiseState state, {Goal? e
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    builder: (sheetContext) => _ControllerScope(controllers: [titleController, descriptionController, targetController], child: StatefulBuilder(builder: (context, setSheetState) => Padding(
+    builder: (sheetContext) => ControllerScope(controllers: [titleController, descriptionController, targetController], child: StatefulBuilder(builder: (context, setSheetState) => Padding(
       padding: EdgeInsets.fromLTRB(20, 4, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: SingleChildScrollView(child: Form(key: formKey, child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         Text(existing == null ? 'Create a goal' : 'Edit goal', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900)),
@@ -142,7 +118,7 @@ Future<void> showGoalEditor(BuildContext context, SpendWiseState state, {Goal? e
 Future<void> showGoalContributionDialog(BuildContext context, SpendWiseState state, Goal goal) async {
   final controller = TextEditingController();
   final formKey = GlobalKey<FormState>();
-  await showDialog<void>(context: context, builder: (dialogContext) => _ControllerScope(controllers: [controller], child: AlertDialog(
+  await showDialog<void>(context: context, builder: (dialogContext) => ControllerScope(controllers: [controller], child: AlertDialog(
     title: Text('Add to ${goal.title}'),
     content: Form(key: formKey, child: TextFormField(controller: controller, autofocus: true, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Amount (${currencySymbol(state.currencyCode)})'), validator: (value) { final amount = double.tryParse(value?.trim() ?? ''); if (amount == null || !amount.isFinite || amount <= 0) return 'Enter an amount greater than zero'; return null; })),
     actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')), FilledButton(onPressed: () { if (!(formKey.currentState?.validate() ?? false)) return; state.contributeToGoal(goal.id, double.parse(controller.text.trim())); Navigator.pop(dialogContext); }, child: const Text('Add savings'))],

@@ -10,6 +10,7 @@ import 'services/cloud_store.dart';
 class SpendWiseState extends ChangeNotifier {
   /// One instance per signed-in user. All data is read from and saved to that
   /// user's own area in Cloud Firestore through [store].
+  // ignore: prefer_initializing_formals
   SpendWiseState({required CloudStore store}) : _store = store;
 
   final CloudStore _store;

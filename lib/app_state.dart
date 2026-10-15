@@ -91,8 +91,17 @@ class SpendWiseState extends ChangeNotifier {
       final settings = snapshot.settings;
       if (settings != null) _applySettings(settings);
       isLoaded = true;
-    } catch (_) {
-      loadError = 'We could not load your data. Check your internet connection and try again.';
+    } catch (error) {
+      debugPrint('SpendWise load failed: $error');
+      final text = error.toString();
+      final code = RegExp(r'\[cloud_firestore/([a-z-]+)\]').firstMatch(text)?.group(1);
+      if (code == 'permission-denied') {
+        loadError = 'Firestore refused access (permission-denied). Publish the rules from firestore.rules in Firebase, Firestore Database, Rules.';
+      } else if (code == 'not-found' || text.contains('database (default) does not exist')) {
+        loadError = 'The Firestore database does not exist yet. Create it in Firebase, Firestore Database, Create database.';
+      } else {
+        loadError = 'We could not load your data${code == null ? '' : ' ($code)'}. Check your internet connection and try again.';
+      }
     } finally {
       notifyListeners();
     }

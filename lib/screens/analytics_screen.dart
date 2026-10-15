@@ -1,493 +1,245 @@
 import 'package:flutter/material.dart';
+
+import '../app_state.dart';
 import '../models/expense.dart';
+import '../utils/app_format.dart';
 
 class AnalyticsScreen extends StatelessWidget {
-  final List<Expense> expenses;
-
-  const AnalyticsScreen({
-    super.key,
-    required this.expenses,
-  });
-
-  double get totalSpent {
-    return expenses.fold(
-      0.0,
-          (sum, expense) => sum + expense.amount,
-    );
-  }
-
-  Map<ExpenseCategory, double> get categoryTotals {
-    final totals = <ExpenseCategory, double>{};
-
-    for (final category in ExpenseCategory.values) {
-      totals[category] = 0.0;
-    }
-
-    for (final expense in expenses) {
-      totals[expense.category] =
-          (totals[expense.category] ?? 0.0) +
-              expense.amount;
-    }
-
-    return totals;
-  }
+  final SpendWiseState state;
+  const AnalyticsScreen({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final now = DateTime.now();
+    final thisMonth = state.expenses.where((e) => isSameMonth(e.date, now)).toList();
+    final lastMonthDate = DateTime(now.year, now.month - 1);
+    final lastMonth = state.expenses.where((e) => isSameMonth(e.date, lastMonthDate)).toList();
+    final lastMonthTotal = lastMonth.fold<double>(0, (sum, e) => sum + e.amount);
+    final lastMonthAtSamePoint = lastMonth.where((e) => e.date.day <= now.day).fold<double>(0, (sum, e) => sum + e.amount);
+    final currentTotal = thisMonth.fold<double>(0, (sum, e) => sum + e.amount);
+    final day = now.day;
+    final difference = currentTotal - lastMonthAtSamePoint;
+    final weekStart = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
+    final dailyTotals = List<double>.generate(7, (index) {
+      final date = weekStart.add(Duration(days: index));
+      return state.expenses.where((e) => isSameDay(e.date, date)).fold<double>(0, (sum, e) => sum + e.amount);
+    });
+    final maxDaily = dailyTotals.fold<double>(0, (max, value) => value > max ? value : max);
+    final weekTotal = dailyTotals.fold<double>(0, (sum, amount) => sum + amount);
+    final categories = <ExpenseCategory, double>{};
+    for (final expense in thisMonth) {
+      categories[expense.category] = (categories[expense.category] ?? 0) + expense.amount;
+    }
+    final categoryEntries = categories.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final averageTransaction = thisMonth.isEmpty ? 0.0 : currentTotal / thisMonth.length;
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    final projected = day == 0 ? currentTotal : currentTotal / day * daysInMonth;
+
     return Scaffold(
-      backgroundColor:
-      Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text(
-          'Analytics',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ),
+      appBar: AppBar(title: const Text('Analytics', style: TextStyle(fontWeight: FontWeight.w900))),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          20,
-          5,
-          20,
-          30,
-        ),
+        padding: const EdgeInsets.fromLTRB(18, 5, 18, 25),
         children: [
-          _periodSelector(context),
-          const SizedBox(height: 18),
-          _overviewCard(context),
-          const SizedBox(height: 22),
-          Text(
-            'Category Insights',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
+          Container(
+            padding: const EdgeInsets.all(21),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(25),
+              gradient: LinearGradient(
+                colors: [state.accentColor, Color.lerp(state.accentColor, const Color(0xFF17172D), 0.72)!],
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(formatMonth(now).toUpperCase(), style: theme.textTheme.labelMedium?.copyWith(color: Colors.white70, letterSpacing: 1.2, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 10),
+                Text(formatMoney(currentTotal, state.currencyCode), style: theme.textTheme.headlineLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                Text('across ${thisMonth.length} transactions', style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(child: _HeroStat(label: 'Daily average', value: formatMoney(day == 0 ? 0 : currentTotal / day, state.currencyCode))),
+                    Expanded(child: _HeroStat(label: 'Month-end pace*', value: formatMoney(projected, state.currencyCode))),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                Text('*Projection assumes your daily average remains constant.', style: theme.textTheme.labelSmall?.copyWith(color: Colors.white60)),
+              ],
             ),
           ),
+          const SizedBox(height: 17),
+          Row(
+            children: [
+              Expanded(child: _SummaryCard(title: 'Budget used', value: '${(state.budgetProgress * 100).round()}%', caption: '${formatMoney(state.remainingBudget, state.currencyCode)} remaining', icon: Icons.track_changes_rounded, color: state.accentColor)),
+              const SizedBox(width: 10),
+              Expanded(child: _SummaryCard(title: 'Avg. transaction', value: formatMoney(averageTransaction, state.currencyCode), caption: 'This month', icon: Icons.receipt_long_rounded, color: const Color(0xFF209A78))),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text('Last 7 days', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 4),
+          Text('Total ${formatMoney(weekTotal, state.currencyCode)}', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(15, 18, 15, 14),
+              child: SizedBox(
+                height: 185,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: List.generate(7, (index) {
+                    final date = weekStart.add(Duration(days: index));
+                    final amount = dailyTotals[index];
+                    final ratio = maxDaily <= 0 ? 0.04 : (amount / maxDaily).clamp(0.04, 1.0).toDouble();
+                    final selected = isSameDay(date, now);
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Tooltip(
+                              message: formatMoney(amount, state.currencyCode),
+                              child: Container(
+                                height: 108 * ratio,
+                                decoration: BoxDecoration(
+                                  color: selected ? state.accentColor : state.accentColor.withValues(alpha: amount == 0 ? 0.10 : 0.45),
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Text(formatDayLabel(date), style: theme.textTheme.labelSmall?.copyWith(fontWeight: selected ? FontWeight.w900 : FontWeight.w500, color: selected ? state.accentColor : theme.colorScheme.onSurfaceVariant)),
+                            const SizedBox(height: 3),
+                            Text(date.day.toString(), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 23),
+          Text('Category breakdown', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 5),
+          Text('Ranked by this month’s spending', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 12),
-          _categoryCard(context),
-          const SizedBox(height: 22),
-          _insightCard(context),
-        ],
-      ),
-    );
-  }
-
-  Widget _periodSelector(BuildContext context) {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          _periodItem(
-            'Week',
-            false,
-          ),
-          _periodItem(
-            'Month',
-            true,
-          ),
-          _periodItem(
-            'Year',
-            false,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _periodItem(
-      String title,
-      bool selected,
-      ) {
-    return Expanded(
-      child: Container(
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF675CF6)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          title,
-          style: TextStyle(
-            color: selected
-                ? Colors.white
-                : Colors.grey,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _overviewCard(BuildContext context) {
-    final values = _dailyValues();
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: Theme.of(context)
-              .dividerColor
-              .withValues(alpha: 0.06),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Spending Overview',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: 190,
-            child: Row(
-              crossAxisAlignment:
-              CrossAxisAlignment.end,
-              mainAxisAlignment:
-              MainAxisAlignment.spaceBetween,
-              children: List.generate(
-                values.length,
-                    (index) {
-                  return Column(
-                    mainAxisAlignment:
-                    MainAxisAlignment.end,
-                    children: [
-                      Container(
-                        width: 27,
-                        height: 135 * values[index],
-                        decoration: BoxDecoration(
-                          borderRadius:
-                          BorderRadius.circular(10),
-                          gradient:
-                          const LinearGradient(
-                            begin:
-                            Alignment.topCenter,
-                            end:
-                            Alignment.bottomCenter,
-                            colors: [
-                              Color(0xFF8C84FF),
-                              Color(0xFF675CF6),
+          if (categoryEntries.isEmpty)
+            Card(child: Padding(padding: const EdgeInsets.all(22), child: Center(child: Text('Add expenses to see category analytics.', style: theme.textTheme.bodyMedium))))
+          else
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: categoryEntries.map((entry) {
+                    final fraction = currentTotal <= 0 ? 0.0 : entry.value / currentTotal;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 15),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Container(width: 35, height: 35, decoration: BoxDecoration(color: entry.key.color.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(11)), child: Icon(entry.key.icon, size: 19, color: entry.key.color)),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(entry.key.label, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800))),
+                              Text(formatMoney(entry.value, state.currencyCode), style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w900)),
                             ],
                           ),
-                        ),
+                          const SizedBox(height: 8),
+                          ClipRRect(borderRadius: BorderRadius.circular(20), child: LinearProgressIndicator(value: fraction, minHeight: 7, color: entry.key.color, backgroundColor: entry.key.color.withValues(alpha: 0.10))),
+                          const SizedBox(height: 3),
+                          Align(alignment: Alignment.centerRight, child: Text('${(fraction * 100).round()}% of spending', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _dayLabel(index),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.color
-                              ?.withValues(alpha: 0.60),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+                    );
+                  }).toList(),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            '₹${totalSpent.toStringAsFixed(0)}',
-            style: const TextStyle(
-              fontSize: 25,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            'Total spending from recorded expenses',
-            style: TextStyle(
-              color: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.color
-                  ?.withValues(alpha: 0.60),
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _categoryCard(BuildContext context) {
-    final totals = categoryTotals;
-    final visible = totals.entries
-        .where((entry) => entry.value > 0)
-        .toList();
-
-    if (visible.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(25),
-        ),
-        child: Text(
-          'Add expenses to generate category insights.',
-          style: TextStyle(
-            color: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.color
-                ?.withValues(alpha: 0.60),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(
-          color: Theme.of(context)
-              .dividerColor
-              .withValues(alpha: 0.06),
-        ),
-      ),
-      child: Column(
-        children: visible.map(
-              (entry) {
-            final percentage =
-            totalSpent == 0.0
-                ? 0.0
-                : entry.value / totalSpent;
-
-            return Padding(
-              padding: const EdgeInsets.only(
-                bottom: 18,
-              ),
-              child: Column(
+          const SizedBox(height: 20),
+          Text('Month-over-month', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(17),
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color:
-                          const Color(0xFF675CF6)
-                              .withValues(
-                            alpha: 0.10,
-                          ),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _categoryIcon(entry.key),
-                          color:
-                          const Color(0xFF675CF6),
-                          size: 18,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _categoryName(entry.key),
-                          style: const TextStyle(
-                            fontWeight:
-                            FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${(percentage * 100).round()}%',
-                        style: const TextStyle(
-                          fontWeight:
-                          FontWeight.w800,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        '₹${entry.value.toStringAsFixed(0)}',
-                        style: const TextStyle(
-                          fontWeight:
-                          FontWeight.w900,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+                  Container(
+                    width: 43,
+                    height: 43,
+                    decoration: BoxDecoration(color: (difference > 0 ? theme.colorScheme.error : const Color(0xFF209A78)).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)),
+                    child: Icon(difference > 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded, color: difference > 0 ? theme.colorScheme.error : const Color(0xFF209A78)),
                   ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius:
-                    BorderRadius.circular(50),
-                    child:
-                    LinearProgressIndicator(
-                      value: percentage,
-                      minHeight: 7,
-                      backgroundColor:
-                      Theme.of(context)
-                          .dividerColor
-                          .withValues(
-                        alpha: 0.10,
-                      ),
-                      valueColor:
-                      const AlwaysStoppedAnimation<
-                          Color>(
-                        Color(0xFF675CF6),
-                      ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(difference > 0 ? 'Higher than last month' : 'Lower than last month', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
+                        const SizedBox(height: 4),
+                        Text(lastMonth.isEmpty ? 'There is not enough previous-month data to compare yet.' : '${formatMoney(difference.abs(), state.currencyCode)} difference against the first $day days of last month.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      ],
                     ),
                   ),
                 ],
               ),
-            );
-          },
-        ).toList(),
-      ),
-    );
-  }
-
-  Widget _insightCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: const BoxDecoration(
-        borderRadius: BorderRadius.all(
-          Radius.circular(24),
-        ),
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFFEDEBFF),
-            Color(0xFFF8EFFF),
-          ],
-        ),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 25,
-            backgroundColor:
-            Color(0xFF675CF6),
-            child: Icon(
-              Icons.auto_awesome_rounded,
-              color: Colors.white,
             ),
           ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Text(
-              'Use these patterns to decide where your next rupee should go.',
-              style: TextStyle(
-                color: Theme.of(context)
-                    .brightness ==
-                    Brightness.dark
-                    ? Colors.black87
-                    : Colors.black87,
-                fontSize: 11,
-                height: 1.4,
-              ),
-            ),
-          ),
+          const SizedBox(height: 7),
+          Text('Last month total: ${formatMoney(lastMonthTotal, state.currencyCode)}', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
         ],
       ),
     );
   }
+}
 
-  List<double> _dailyValues() {
-    final values = List<double>.filled(7, 0.0);
+class _HeroStat extends StatelessWidget {
+  final String label;
+  final String value;
+  const _HeroStat({required this.label, required this.value});
 
-    for (final expense in expenses) {
-      final day =
-          expense.date.weekday - 1;
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 4),
+          Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70)),
+        ],
+      );
+}
 
-      if (day >= 0 && day < 7) {
-        values[day] += expense.amount;
-      }
-    }
+class _SummaryCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String caption;
+  final IconData icon;
+  final Color color;
+  const _SummaryCard({required this.title, required this.value, required this.caption, required this.icon, required this.color});
 
-    final maxValue = values.reduce(
-          (a, b) => a > b ? a : b,
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(height: 12),
+            Text(title, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 4),
+            FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900))),
+            const SizedBox(height: 4),
+            Text(caption, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          ],
+        ),
+      ),
     );
-
-    if (maxValue == 0.0) {
-      return List<double>.filled(7, 0.08);
-    }
-
-    return values.map(
-          (value) =>
-          (value / maxValue)
-              .clamp(0.08, 1.0),
-    ).toList();
-  }
-
-  String _dayLabel(int index) {
-    const days = [
-      'M',
-      'T',
-      'W',
-      'T',
-      'F',
-      'S',
-      'S',
-    ];
-
-    return days[index];
-  }
-
-  String _categoryName(ExpenseCategory category) {
-    switch (category) {
-      case ExpenseCategory.food:
-        return 'Food';
-      case ExpenseCategory.transport:
-        return 'Transport';
-      case ExpenseCategory.shopping:
-        return 'Shopping';
-      case ExpenseCategory.bills:
-        return 'Bills';
-      case ExpenseCategory.health:
-        return 'Health';
-      case ExpenseCategory.education:
-        return 'Education';
-      case ExpenseCategory.entertainment:
-        return 'Entertainment';
-      case ExpenseCategory.other:
-        return 'Other';
-    }
-  }
-
-  IconData _categoryIcon(ExpenseCategory category) {
-    switch (category) {
-      case ExpenseCategory.food:
-        return Icons.restaurant_rounded;
-      case ExpenseCategory.transport:
-        return Icons.directions_car_rounded;
-      case ExpenseCategory.shopping:
-        return Icons.shopping_bag_rounded;
-      case ExpenseCategory.bills:
-        return Icons.receipt_long_rounded;
-      case ExpenseCategory.health:
-        return Icons.favorite_rounded;
-      case ExpenseCategory.education:
-        return Icons.school_rounded;
-      case ExpenseCategory.entertainment:
-        return Icons.movie_rounded;
-      case ExpenseCategory.other:
-        return Icons.more_horiz_rounded;
-    }
   }
 }
